@@ -9,6 +9,8 @@ const LEVELS = {
        minutes: { pistas: 3, chat: 10, adivinar: 4, votar: 4 } },
   3: { name: "Cuarto y quinto", saboteurs: 2, msgMode: "text", maxMsgs: 3, maxLen: 40, guess: "text", nOptions: 0,
        minutes: { pistas: 3, chat: 14, adivinar: 5, votar: 5 } },
+  4: { name: "Modo difícil", saboteurs: 2, msgMode: "text", maxMsgs: 3, maxLen: 30, guess: "text", nOptions: 0,
+       minutes: { pistas: 3, chat: 15, adivinar: 5, votar: 5 } },
 };
 
 /* Opciones para adivinar (niveles 1 y 2) */
@@ -99,6 +101,36 @@ const WORDS = {
       { e: "🔁", t: "Se copia a otras compus" }, { e: "⚠️", t: "Por eso no hay que abrir links raros" },
       { e: "5️⃣", t: "Tiene 5 letras" }, { e: "🔤", t: "Empieza con V" } ],
     fakes: [ { e: "🖐️", t: "Es una parte que se puede tocar" }, { e: "7️⃣", t: "Tiene 7 letras" } ] },
+
+  /* ---- Modo difícil ---- */
+  algoritmo: { level: 4, word: "Algoritmo", e: "📋", accept: ["algoritmo", "algoritmos", "algorismo"],
+    clues: [
+      { e: "📋", t: "Es una lista de pasos en orden" }, { e: "🍳", t: "Una receta de cocina es uno" },
+      { e: "🧠", t: "Las compus lo siguen para resolver problemas" }, { e: "🎯", t: "Decide qué videos te recomiendan" },
+      { e: "❌", t: "Si un paso está mal, el resultado falla" }, { e: "💻", t: "Se usa para programar" },
+      { e: "📜", t: "Existía antes que las computadoras" }, { e: "9️⃣", t: "Tiene 9 letras" } ],
+    fakes: [ { e: "🖐️", t: "Se puede tocar con la mano" }, { e: "7️⃣", t: "Tiene 7 letras" } ] },
+  pixel: { level: 4, word: "Píxel", e: "👾", accept: ["pixel", "pixeles", "pixels", "pixel"],
+    clues: [
+      { e: "🔍", t: "Es un puntito diminuto" }, { e: "📱", t: "Las pantallas tienen millones" },
+      { e: "🎨", t: "Cada uno muestra un solo color" }, { e: "🔎", t: "Si hacés mucho zoom en una foto, los ves" },
+      { e: "👾", t: "Los juegos viejos se notan hechos de estos" }, { e: "📸", t: "Más de estos, foto más nítida" },
+      { e: "⬛", t: "Tiene forma de cuadradito" }, { e: "5️⃣", t: "Tiene 5 letras" } ],
+    fakes: [ { e: "⚽", t: "Es redondo como una pelota" }, { e: "6️⃣", t: "Tiene 6 letras" } ] },
+  nube: { level: 4, word: "Nube", e: "☁️", accept: ["nube", "la nube", "cloud", "nubes"],
+    clues: [
+      { e: "🗄️", t: "Guarda tus archivos lejos de tu compu" }, { e: "📲", t: "Podés ver tus fotos desde otro aparato" },
+      { e: "🌐", t: "Necesitás internet para usarla" }, { e: "🏢", t: "En realidad son edificios llenos de compus" },
+      { e: "💾", t: "Si se rompe tu celu, tus cosas siguen ahí" }, { e: "🌤️", t: "Su nombre viene del cielo" },
+      { e: "🔐", t: "Se entra con usuario y contraseña" }, { e: "4️⃣", t: "Tiene 4 letras" } ],
+    fakes: [ { e: "📴", t: "Funciona sin internet" }, { e: "6️⃣", t: "Tiene 6 letras" } ] },
+  bluetooth: { level: 4, word: "Bluetooth", e: "🔷", accept: ["bluetooth", "blutu", "blututh", "bluetut", "blutut", "bluetoot"],
+    clues: [
+      { e: "🔗", t: "Conecta aparatos que están cerca" }, { e: "✂️", t: "No usa cables" },
+      { e: "🎧", t: "Así se conectan los auriculares inalámbricos" }, { e: "🔷", t: "Su ícono es azul" },
+      { e: "🦷", t: "Su nombre en inglés significa diente azul" }, { e: "📏", t: "Si te alejás mucho, se corta" },
+      { e: "👑", t: "Se llama como un rey vikingo" }, { e: "9️⃣", t: "Tiene 9 letras" } ],
+    fakes: [ { e: "🌍", t: "Llega a cualquier país del mundo" }, { e: "6️⃣", t: "Tiene 6 letras" } ] },
 };
 
 const ORDER = ["lobby", "pistas", "chat", "adivinar", "votar", "final"];
