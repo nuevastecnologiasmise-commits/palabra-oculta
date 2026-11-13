@@ -60,12 +60,19 @@ function shell(inner) {
     <span class="phase">${PHASES[view.phase]}</span><span class="timer" id="timer"></span></header>
     <div class="screen">${inner}</div><p class="status" id="status"></p>`;
 }
-const noteHTML = (c, mini = false) => `<div class="note ${mini ? "mini" : ""}">
+const imp = () => view.level.mode === "impostor";
+const noteHTML = (c, mini = false) => !c
+  ? `<div class="note ${mini ? "mini" : ""}"><span class="note-emoji" aria-hidden="true">❓</span><p class="note-text">No sabés la palabra</p></div>`
+  : `<div class="note ${mini ? "mini" : ""}">
   <span class="note-emoji" aria-hidden="true">${c.e}</span><p class="note-text">${esc(c.t)}</p>
   <button class="say" type="button" data-say="${esc(c.t)}">🔊 Escuchar</button></div>`;
-const sabBanner = () => view.me.saboteur
-  ? `<div class="banner"><b>¡Sos ${view.level.nSab > 1 ? "un saboteador" : "el saboteador"}! 🤫</b> Tu pista es falsa. Confundí al grupo sin que te descubran.
-     <button class="say" type="button" data-say="Sos el saboteador. Tu pista es falsa. Confundí al grupo sin que te descubran.">🔊 Escuchar</button></div>` : "";
+const sabBanner = () => {
+  if (!view.me.saboteur) return "";
+  const t = imp() ? "No sabés la palabra. Mirá lo que escriben los demás, disimulá y tratá de adivinarla."
+    : "Tu pista es falsa. Confundí al grupo sin que te descubran.";
+  return `<div class="banner"><b>¡Sos ${view.level.nSab > 1 ? "un saboteador" : "el saboteador"}! 🤫</b> ${t}
+    <button class="say" type="button" data-say="Sos el saboteador. ${esc(t)}">🔊 Escuchar</button></div>`;
+};
 const feedHTML = () => `<ul class="feed" id="feed" aria-live="polite"></ul>`;
 const notPlaying = () => shell(`<div class="wait"><div class="big-emoji">👀</div><h2>Esta ronda la mirás desde afuera</h2>
   <p class="muted">Entraste cuando ya había empezado. En la próxima jugás.</p></div>`);
@@ -81,7 +88,9 @@ const build = {
   pistas() {
     if (!view.me.inGame) return app.innerHTML = notPlaying();
     app.innerHTML = shell(`${sabBanner()}${noteHTML(view.me.clue)}
-      <p class="hint">${view.me.saboteur ? "Hacé de cuenta que tu pista es verdadera." : "Esta es tu pista. Con las de tus compañeros van a descubrir la palabra oculta."}<br>
+      <p class="hint">${imp()
+        ? (view.me.saboteur ? "Hacé de cuenta que la sabés." : "Esta es la palabra secreta. Vas a tener que describirla sin decirla, porque el saboteador no la sabe.")
+        : (view.me.saboteur ? "Hacé de cuenta que tu pista es verdadera." : "Esta es tu pista. Con las de tus compañeros van a descubrir la palabra oculta.")}<br>
       En un ratito van a poder conversar.</p>`);
   },
   chat() {
@@ -89,8 +98,8 @@ const build = {
     const L = view.level;
     const composer = L.msgMode === "emoji"
       ? `<div class="palette">${view.palette.map(e => `<button class="emo" type="button" data-emo="${e}">${e}</button>`).join("")}</div>
-         <button class="btn" type="button" id="shareClue">📝 Mostrar mi pista</button>`
-      : `<form class="send" id="sendForm" autocomplete="off"><input id="msg" maxlength="${L.maxLen}" placeholder="Escribí algo sobre tu pista">
+         ${imp() ? "" : `<button class="btn" type="button" id="shareClue">📝 Mostrar mi pista</button>`}`
+      : `<form class="send" id="sendForm" autocomplete="off"><input id="msg" maxlength="${L.maxLen}" placeholder="${imp() ? "Describí la palabra sin decirla" : "Escribí algo sobre tu pista"}">
          <button class="btn" id="sendBtn">Enviar</button></form>`;
     app.innerHTML = shell(`${noteHTML(view.me.clue, true)}${feedHTML()}
       <div class="composer"><p class="left" id="left"></p>${composer}</div>`);
@@ -123,22 +132,38 @@ const build = {
     const others = view.players.filter(p => p.id !== view.me.id);
     const q = view.me.saboteur ? "Votá a alguien para disimular" : view.level.nSab > 1
       ? "Hay 2 saboteadores. ¿Quién te parece más sospechoso?" : "¿Quién es el saboteador?";
-    app.innerHTML = shell(`<p class="question">${q}</p>
+    const sabGuess = imp() && view.me.saboteur;
+    const guessBox = !sabGuess ? "" : `<p class="question">¿Cuál es la palabra? Si la adivinás, te salvás</p>
+      ${view.options
+        ? `<div class="options">${view.options.map(o => `<button class="opt" type="button" data-guess="${o.id}">
+            <span class="oe" aria-hidden="true">${o.e}</span>${esc(o.t)}</button>`).join("")}</div>`
+        : `<form class="send" id="guessForm" autocomplete="off"><input id="guessIn" maxlength="30" placeholder="La palabra es…">
+            <button class="btn">Responder</button></form>`}
+      <p class="done" id="doneGuess"></p>`;
+    app.innerHTML = shell(`${guessBox}<p class="question">${q}</p>
       <div class="options">${others.map(p => `<button class="opt" type="button" data-vote="${p.id}">
         <span class="oe" aria-hidden="true">🕵️</span>${esc(p.name)}</button>`).join("")}</div>
       <p class="done" id="done"></p>${feedHTML()}`);
     app.querySelectorAll("[data-vote]").forEach(b => b.onclick = () => answer("vote", { target: b.dataset.vote }));
+    app.querySelectorAll("[data-guess]").forEach(b => b.onclick = () => answer("guess", { value: b.dataset.guess }));
+    const gf = document.getElementById("guessForm");
+    if (gf) gf.onsubmit = e => { e.preventDefault(); answer("guess", { value: document.getElementById("guessIn").value }); };
   },
   final() {
     const r = view.result, me = view.me;
     if (!r) return app.innerHTML = shell(`<p class="hint">Calculando…</p>`);
     let mine = "";
-    if (me.inGame && me.saboteur) mine = me.caughtMe
+    if (me.inGame && me.saboteur && imp()) mine = !me.caughtMe || me.correct
+      ? `<span class="pill ok">${me.caughtMe ? "Te descubrieron, ¡pero adivinaste la palabra! 😎" : "¡No te descubrieron! 😎"}</span>`
+      : `<span class="pill bad">Te descubrieron 😅</span>`;
+    else if (me.inGame && imp()) mine = r.caught >= r.nSab
+      ? `<span class="pill ok">¡Atraparon al saboteador! 🎉</span>` : `<span class="pill bad">El saboteador se escapó</span>`;
+    else if (me.inGame && me.saboteur) mine = me.caughtMe
       ? `<span class="pill bad">Te descubrieron 😅</span>` : `<span class="pill ok">¡No te descubrieron! 😎</span>`;
     else if (me.inGame) mine = me.correct
       ? `<span class="pill ok">¡Adivinaste la palabra! 🎉</span>` : `<span class="pill bad">Esta vez no la adivinaste</span>`;
     app.innerHTML = shell(`<div class="final">
-      <p class="verdict">${r.guessed ? "¡El grupo descubrió la palabra!" : "La palabra se escapó esta vez"}</p>
+      <p class="verdict">${imp() ? "La palabra era" : r.guessed ? "¡El grupo descubrió la palabra!" : "La palabra se escapó esta vez"}</p>
       <div class="note"><span class="note-emoji">${r.e}</span><p class="note-text">${esc(r.word)}</p>
         <button class="say" type="button" data-say="${esc(r.word)}">🔊 Escuchar</button></div>
       <p>${mine}</p>
@@ -174,6 +199,8 @@ function update() {
     else if (view.phase === "votar" && view.me.vote) done.textContent = "¡Votaste! Podés cambiar hasta que termine el tiempo.";
     else done.textContent = "";
   }
+  const dg = document.getElementById("doneGuess");
+  if (dg) dg.textContent = view.me.guess == null ? "" : view.options ? "¡Respuesta guardada!" : `Respondiste: “${view.me.guess}”.`;
 }
 function renderFeed() {
   const el = document.getElementById("feed");
