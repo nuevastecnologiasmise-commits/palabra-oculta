@@ -3,13 +3,13 @@ import { randomInt } from "node:crypto";
 
 /* ============ CONFIGURACIÓN DE NIVELES ============ */
 const LEVELS = {
-  1: { name: "Primer grado", saboteurs: 1, msgMode: "emoji", maxMsgs: 5, maxLen: 0, guess: "options", nOptions: 4,
+  1: { name: "Primer grado", saboteurs: 1, defaultMode: "impostor", msgMode: "emoji", maxMsgs: 5, maxLen: 0, guess: "options", nOptions: 4,
        minutes: { pistas: 2, chat: 6, adivinar: 3, votar: 3 } },
-  2: { name: "Segundo y tercero", saboteurs: 1, msgMode: "text", maxMsgs: 3, maxLen: 30, guess: "options", nOptions: 6,
+  2: { name: "Segundo y tercero", saboteurs: 1, defaultMode: "impostor", msgMode: "text", maxMsgs: 3, maxLen: 30, guess: "options", nOptions: 6,
        minutes: { pistas: 3, chat: 10, adivinar: 4, votar: 4 } },
-  3: { name: "Cuarto y quinto", saboteurs: 2, msgMode: "text", maxMsgs: 3, maxLen: 40, guess: "text", nOptions: 0,
+  3: { name: "Cuarto y quinto", saboteurs: 2, defaultMode: "pistas", msgMode: "text", maxMsgs: 3, maxLen: 40, guess: "text", nOptions: 0,
        minutes: { pistas: 3, chat: 14, adivinar: 5, votar: 5 } },
-  4: { name: "Modo difícil", saboteurs: 2, msgMode: "text", maxMsgs: 3, maxLen: 30, guess: "text", nOptions: 0,
+  4: { name: "Modo difícil", saboteurs: 2, defaultMode: "pistas", msgMode: "text", maxMsgs: 3, maxLen: 30, guess: "text", nOptions: 0,
        minutes: { pistas: 3, chat: 15, adivinar: 5, votar: 5 } },
 };
 
@@ -30,6 +30,9 @@ const POOL = {
 
 /* Emojis que puede mandar primer grado */
 const PALETTE = ["👍", "👎", "🤔", "❓", "👀", "✋", "🖱️", "🖥️", "🎧", "⌨️", "👂", "🎵", "🔊", "💡"];
+/* En modo impostor: dibujitos que describen sin nombrar el aparato */
+const IMP_PALETTE = ["🖐️", "👀", "👂", "👆", "🎵", "🔊", "💡", "🔌", "✍️", "🌈", "📄", "🤔", "❓", "👍"];
+const MODES = ["pistas", "impostor"];
 
 /* Palabras: 8 pistas verdaderas y 2 falsas (saboteadores) */
 const WORDS = {
@@ -180,9 +183,13 @@ async function readPlayers(s, code) {
   return list.filter(Boolean).sort((a, b) => a.joinedAt - b.joinedAt);
 }
 const saveRoom = (s, room) => s.setJSON(rk(room.code), room);
+const isImp = room => room.mode === "impostor";
+const modeFrom = (m, level) => MODES.includes(m) ? m : LEVELS[level].defaultMode;
+const phasesOf = room => isImp(room) ? ORDER.filter(p => p !== "adivinar") : ORDER;
 const levelInfo = room => {
   const L = LEVELS[room.level];
-  return { n: room.level, name: L.name, msgMode: L.msgMode, maxMsgs: L.maxMsgs, maxLen: L.maxLen, guess: L.guess, nSab: room.nSab || 0 };
+  return { n: room.level, name: L.name, msgMode: L.msgMode, maxMsgs: L.maxMsgs, maxLen: L.maxLen, guess: L.guess,
+    nSab: room.nSab || 0, mode: room.mode || "pistas" };
 };
 function allMessages(players) {
   const out = [];
@@ -209,7 +216,9 @@ function assignRoles(players, room) {
   const ids = shuffle(players.map(p => p.id));
   const clues = shuffle(w.clues);
   const assign = {};
+  const imp = isImp(room);
   ids.forEach((id, i) => {
+    if (imp) { assign[id] = i < nSab ? { saboteur: true, clue: null } : { saboteur: false, clue: { e: w.e, t: w.word } }; return; }
     assign[id] = i < nSab
       ? { saboteur: true, clue: w.fakes[i % w.fakes.length] }
       : { saboteur: false, clue: clues[(i - nSab) % clues.length] };
@@ -220,7 +229,8 @@ function computeResult(room, players) {
   const w = WORDS[room.wordId];
   const assign = room.secret.assign;
   const inGame = players.filter(p => assign[p.id]);
-  const guessers = inGame.filter(p => !assign[p.id].saboteur);
+  const imp = isImp(room);
+  const guessers = inGame.filter(p => imp ? assign[p.id].saboteur : !assign[p.id].saboteur);
   const opts = room.options || [];
   const tallyMap = new Map();
   let correct = 0, answered = 0;
@@ -246,7 +256,9 @@ function computeResult(room, players) {
     tally: [...tallyMap.values()].sort((a, b) => b.count - a.count).slice(0, 8),
     saboteurs: inGame.filter(p => assign[p.id].saboteur).map(p => p.name),
     votes: voteTally.filter(v => v.count > 0).slice(0, 8),
-    caught, nSab,
+    caught, nSab, mode: room.mode || "pistas",
+    sabGuesses: imp ? guessers.map(p => ({ name: p.name, correct: isCorrect(room, p.guess),
+      guess: p.guess == null ? null : (opts.find(o => o.id === p.guess)?.t || clean(p.guess, 30)) })) : null,
   };
 }
 
@@ -254,7 +266,7 @@ function computeResult(room, players) {
 const ACTIONS = {
   /* Datos para armar el panel */
   async catalog() {
-    const levels = Object.entries(LEVELS).map(([n, L]) => ({ n: Number(n), name: L.name, minutes: L.minutes }));
+    const levels = Object.entries(LEVELS).map(([n, L]) => ({ n: Number(n), name: L.name, minutes: L.minutes, defaultMode: L.defaultMode }));
     const words = Object.entries(WORDS).map(([id, w]) => ({ id, level: w.level, word: w.word, e: w.e }));
     return { levels, words };
   },
@@ -267,7 +279,7 @@ const ACTIONS = {
       code = rid(4, "ABCDEFGHJKLMNPQRSTUVWXYZ");
       if (!(await s.get(rk(code)))) break;
     }
-    const room = { code, hostKey: rid(16), level, wordId: b.wordId, minutes: minutesFrom(b.minutes, level),
+    const room = { code, hostKey: rid(16), level, wordId: b.wordId, minutes: minutesFrom(b.minutes, level), mode: modeFrom(b.mode, level),
       phase: "lobby", endsAt: null, createdAt: Date.now(), secret: {}, options: null, nSab: 0, hidden: [],
       pub: { players: [], messages: [] }, result: null };
     await saveRoom(s, room);
@@ -314,9 +326,9 @@ const ACTIONS = {
 
   async next(s, b) {
     const room = await loadHostRoom(s, b);
-    const i = ORDER.indexOf(room.phase);
-    if (i < 1 || i >= ORDER.length - 1) throw new GameError("No hay una fase siguiente", "BAD");
-    const phase = ORDER[i + 1];
+    const order = phasesOf(room), i = order.indexOf(room.phase);
+    if (i < 1 || i >= order.length - 1) throw new GameError("No hay una fase siguiente", "BAD");
+    const phase = order[i + 1];
     room.phase = phase;
     room.endsAt = TIMED.includes(phase) ? Date.now() + room.minutes[phase] * 60000 : null;
     if (phase === "final") room.result = computeResult(room, await readPlayers(s, room.code));
@@ -354,7 +366,7 @@ const ACTIONS = {
     const level = checkSetup(b.level, b.wordId);
     const players = await readPlayers(s, room.code);
     await Promise.all(players.map(p => s.setJSON(pk(room.code, p.id), { ...p, msgs: [], guess: null, vote: null })));
-    Object.assign(room, { level, wordId: b.wordId, minutes: minutesFrom(b.minutes, level), phase: "lobby",
+    Object.assign(room, { level, wordId: b.wordId, minutes: minutesFrom(b.minutes, level), mode: modeFrom(b.mode, level), phase: "lobby",
       endsAt: null, secret: {}, options: null, nSab: 0, hidden: [], result: null,
       pub: { players: players.map(p => ({ id: p.id, name: p.name })), messages: [] } });
     await saveRoom(s, room);
@@ -395,11 +407,11 @@ const ACTIONS = {
       players: room.pub.players, messages: room.pub.messages,
       me: { id: me.id, name: me.name, inGame: !!a, clue: a?.clue || null, saboteur: !!a?.saboteur,
         msgsLeft: L.maxMsgs - (me.msgs || []).length, guess: me.guess, vote: me.vote },
-      palette: L.msgMode === "emoji" ? PALETTE : null,
+      palette: L.msgMode === "emoji" ? (isImp(room) ? IMP_PALETTE : PALETTE) : null,
       options: ["adivinar", "votar", "final"].includes(room.phase) ? room.options : null,
       result: room.phase === "final" ? room.result : null,
     };
-    if (room.phase === "final" && a && !a.saboteur) view.me.correct = isCorrect(room, me.guess);
+    if (room.phase === "final" && a && (isImp(room) ? a.saboteur : !a.saboteur)) view.me.correct = isCorrect(room, me.guess);
     if (room.phase === "final" && a) view.me.caughtMe = a.saboteur && room.result?.votes.slice(0, room.nSab).some(v => v.name === me.name);
     return view;
   },
@@ -421,8 +433,9 @@ const ACTIONS = {
     if ((me.msgs || []).length >= L.maxMsgs) throw new GameError("Ya usaste todos tus mensajes", "LIMIT");
     let text;
     if (L.msgMode === "emoji") {
-      if (b.kind === "clue") text = `${a.clue.e} ${a.clue.t}`;
-      else if (PALETTE.includes(b.text)) text = b.text;
+      const pal = isImp(room) ? IMP_PALETTE : PALETTE;
+      if (b.kind === "clue" && !isImp(room)) text = `${a.clue.e} ${a.clue.t}`;
+      else if (pal.includes(b.text)) text = b.text;
       else throw new GameError("Elegí un dibujito", "BAD");
     } else {
       text = clean(b.text, L.maxLen);
@@ -435,10 +448,12 @@ const ACTIONS = {
 
   async guess(s, b) {
     const room = await loadRoom(s, b.code);
-    if (room.phase !== "adivinar") throw new GameError("Ahora no es momento de adivinar", "PHASE");
     const key = pk(room.code, clean(b.playerId, 20));
     const me = await s.get(key, { type: "json" });
-    if (!me || !room.secret.assign?.[me.id]) throw new GameError("No estás jugando esta ronda", "NO_PLAYER");
+    const a = me && room.secret.assign?.[me.id];
+    if (!a) throw new GameError("No estás jugando esta ronda", "NO_PLAYER");
+    const allowed = isImp(room) ? room.phase === "votar" && a.saboteur : room.phase === "adivinar";
+    if (!allowed) throw new GameError("Ahora no es momento de adivinar", "PHASE");
     let g;
     if (room.options) {
       if (!room.options.some(o => o.id === b.value)) throw new GameError("Elegí una opción", "BAD");
