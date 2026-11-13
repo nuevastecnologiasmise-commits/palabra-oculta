@@ -3,7 +3,7 @@ const KEY = "po-anfitrion";
 let sess = LS.get(KEY);            // { code, hostKey }
 let catalog = null, hv = null, offset = 0, pollT = null, busy = false, showRoles = false, stageSig = "";
 let rolesSig = "";
-let pick = { level: 1, wordId: null, minutes: null };
+let pick = { level: 1, wordId: null, minutes: null, mode: null };
 
 const NEXT_LABEL = { lobby: "Empezar juego", pistas: "Empezar a conversar", chat: "Pasar a adivinar",
   adivinar: "Pasar a votar", votar: "Ver resultado" };
@@ -17,12 +17,15 @@ async function showSetup(mode = "new") {
     catch (e) { app.innerHTML = `<p class="error">${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reintentar</button>`; return; }
   }
   if (!pick.minutes) pick.minutes = { ...catalog.levels.find(l => l.n === pick.level).minutes };
+  if (!pick.mode) pick.mode = catalog.levels.find(l => l.n === pick.level).defaultMode;
   app.innerHTML = `
     <section class="setup">
       <h1 class="title">La palabra<br>oculta</h1>
       <p class="lead">${mode === "reset" ? "Elegí la palabra para la próxima ronda. Los chicos siguen conectados." : "Elegí el grupo y la palabra secreta. Después proyectá esta pantalla."}</p>
       <p><span class="warn">Hacé esto sin proyectar: acá se ve la palabra.</span></p>
       <h2>Grupo</h2><div class="choice" id="levels"></div>
+      <h2>Forma de jugar</h2><div class="choice" id="modes"></div>
+      <p class="muted" id="modeHint"></p>
       <h2>Palabra secreta</h2><div class="choice" id="words"></div>
       <h2>Minutos por fase</h2>
       <div class="mins">
@@ -41,16 +44,24 @@ async function showSetup(mode = "new") {
     if (!words.some(w => w.id === pick.wordId)) pick.wordId = words[0].id;
     document.getElementById("words").innerHTML = words.map(w =>
       `<button class="chip-btn ${w.id === pick.wordId ? "sel" : ""}" data-word="${w.id}">${w.e} ${esc(w.word)}</button>`).join("");
+    document.getElementById("modes").innerHTML = [["impostor", "Impostor"], ["pistas", "Pistas"]].map(([m, t]) =>
+      `<button class="chip-btn ${m === pick.mode ? "sel" : ""}" data-mode="${m}">${t}</button>`).join("");
+    document.getElementById("modeHint").textContent = pick.mode === "impostor"
+      ? "Todos ven la palabra menos el saboteador. La describen sin decirla y votan quién no la sabe."
+      : "Nadie sabe la palabra. Cada uno tiene una pista, juntan todas para adivinarla y votan al saboteador.";
     app.querySelectorAll("[data-min]").forEach(i => i.value = pick.minutes[i.dataset.min]);
+    document.querySelector('[data-min="adivinar"]').closest("label").hidden = pick.mode === "impostor";
     drawTotal();
   };
   const drawTotal = () => {
-    const t = Object.values(pick.minutes).reduce((a, b) => a + Number(b || 0), 0);
+    const t = Object.entries(pick.minutes).reduce((a, [k, v]) => a + (k === "adivinar" && pick.mode === "impostor" ? 0 : Number(v || 0)), 0);
     document.getElementById("total").textContent = `En total: unos ${t} minutos.`;
   };
   app.querySelector(".setup").addEventListener("click", e => {
-    const l = e.target.closest("[data-level]"), w = e.target.closest("[data-word]");
-    if (l) { pick.level = Number(l.dataset.level); pick.minutes = { ...catalog.levels.find(x => x.n === pick.level).minutes }; drawLevels(); }
+    const l = e.target.closest("[data-level]"), w = e.target.closest("[data-word]"), m = e.target.closest("[data-mode]");
+    if (l) { pick.level = Number(l.dataset.level); const L = catalog.levels.find(x => x.n === pick.level);
+      pick.minutes = { ...L.minutes }; pick.mode = L.defaultMode; drawLevels(); }
+    if (m) { pick.mode = m.dataset.mode; drawLevels(); }
     if (w) { pick.wordId = w.dataset.word; drawLevels(); }
   });
   app.querySelectorAll("[data-min]").forEach(i => i.oninput = () => { pick.minutes[i.dataset.min] = Number(i.value); drawTotal(); });
@@ -60,7 +71,7 @@ async function showSetup(mode = "new") {
   document.getElementById("go").onclick = async () => {
     const btn = document.getElementById("go"); btn.disabled = true;
     try {
-      const data = { level: pick.level, wordId: pick.wordId, minutes: pick.minutes };
+      const data = { level: pick.level, wordId: pick.wordId, minutes: pick.minutes, mode: pick.mode };
       if (mode === "reset") await api("reset", { ...sess, ...data });
       else { const r = await api("create", data); sess = { code: r.code, hostKey: r.hostKey }; LS.set(KEY, sess); }
       buildRoom(); poll();
@@ -136,11 +147,16 @@ async function act(action, extra = {}) {
 /* ---------- Dibujo ---------- */
 function draw() {
   if (!document.getElementById("stage")) return;
-  const order = Object.keys(PHASES), idx = order.indexOf(hv.phase);
-  app.querySelectorAll("[data-step]").forEach((li, i) => { li.className = i === idx ? "now" : i < idx ? "past" : ""; });
+  const imp = hv.level.mode === "impostor";
+  const order = Object.keys(PHASES).filter(p => !(imp && p === "adivinar")), idx = order.indexOf(hv.phase);
+  app.querySelectorAll("[data-step]").forEach(li => {
+    const i = order.indexOf(li.dataset.step);
+    li.hidden = i < 0;
+    li.className = i === idx ? "now" : i < idx ? "past" : "";
+  });
   const next = document.getElementById("nextBtn");
   next.hidden = hv.phase === "final";
-  next.textContent = NEXT_LABEL[hv.phase] || "";
+  next.textContent = imp && hv.phase === "chat" ? "Pasar a votar" : NEXT_LABEL[hv.phase] || "";
   next.disabled = busy || (hv.phase === "lobby" && hv.players.length < 3);
   document.getElementById("timeBtn").hidden = !hv.endsAt;
   document.title = `${sess.code} · La palabra oculta`;
@@ -178,6 +194,14 @@ function stageHTML() {
       <div class="chips">${hv.players.map(pl => `<span class="chip">${esc(pl.name)}
         <button class="x" data-kick="${pl.id}" data-name="${esc(pl.name)}" aria-label="Sacar a ${esc(pl.name)}">✕</button></span>`).join("")}</div>`;
   }
+  const imp = hv.level.mode === "impostor";
+  if (p === "pistas" && imp) return `<p class="stage-title">Todos ven la palabra… menos ${hv.level.nSab > 1 ? "los saboteadores" : "el saboteador"} 🤫</p>
+    <p class="lead">Todavía no se dice nada. Después la van a describir sin decirla.</p>
+    <div class="chips">${inGame().map(pl => `<span class="chip noX">${esc(pl.name)}</span>`).join("")}</div>`;
+  if (p === "chat" && imp) return `<p class="stage-title">Describan la palabra sin decirla</p>${wallHTML()}`;
+  if (p === "votar" && imp) return `<p class="stage-title">¿Quién no sabe la palabra?</p>
+    <p class="muted">${hv.level.nSab > 1 ? "Los saboteadores también intentan" : "El saboteador también intenta"} adivinarla para salvarse.</p>
+    ${progressHTML("voted", "votaron")}${wallHTML()}`;
   if (p === "pistas") return `<p class="stage-title">Cada uno está leyendo su pista 🕵️</p>
     <p class="lead">Todavía no se dice nada. En un ratito empiezan a conversar.</p>
     <p class="muted">${hv.level.nSab > 1 ? `Entre ustedes hay ${hv.level.nSab} saboteadores con pistas falsas.` : "Entre ustedes hay un saboteador con una pista falsa."}</p>
@@ -189,6 +213,17 @@ function stageHTML() {
   if (!r) return `<p class="lead">Calculando…</p>`;
   const sabText = r.caught >= r.nSab ? (r.nSab > 1 ? "¡Los atraparon a los dos!" : "¡Lo atraparon!")
     : r.caught > 0 ? "Atraparon a uno de los dos." : r.nSab > 1 ? "¡Se escaparon sin que los descubran!" : "¡Se escapó sin que lo descubran!";
+  if (imp) {
+    const many = r.saboteurs.length > 1;
+    return `<div class="reveal">
+    <div class="note"><span class="note-emoji">${r.e}</span><p class="note-text">${esc(r.word)}</p></div>
+    <div class="res-block">
+      <p class="stage-title">${r.caught >= r.nSab ? (many ? "¡Atraparon a los saboteadores!" : "¡Atraparon al saboteador!") : sabText}</p>
+      <h3>${many ? "Los saboteadores eran" : "El saboteador era"} ${r.saboteurs.map(esc).join(" y ")}</h3>
+      ${r.sabGuesses.map(g => `<p>${esc(g.name)} ${g.guess == null ? "no intentó adivinar." : `dijo “${esc(g.guess)}” ${g.correct ? "y adivinó la palabra ✅" : "y no la adivinó ❌"}`}</p>`).join("")}
+      ${r.votes.length ? `<h3>Votos</h3>${bars(r.votes, x => x.saboteur ? "sab" : "")}` : ""}
+    </div></div>`;
+  }
   return `<div class="reveal">
     <div class="note"><span class="note-emoji">${r.e}</span><p class="note-text">${esc(r.word)}</p></div>
     <div class="res-block">
@@ -211,7 +246,7 @@ function drawRoles() {
   rolesSig = sig;
   const rows = hv.roles.length
     ? `<table><tr><th>Nombre</th><th>Pista</th></tr>${hv.roles.map(r => `<tr class="${r.saboteur ? "sab" : ""}">
-        <td>${esc(r.name)}${r.saboteur ? " 🤫" : ""}</td><td>${r.clue.e} ${esc(r.clue.t)}</td></tr>`).join("")}</table>`
+        <td>${esc(r.name)}${r.saboteur ? " 🤫" : ""}</td><td>${r.clue ? `${r.clue.e} ${esc(r.clue.t)}` : "No sabe la palabra"}</td></tr>`).join("")}</table>`
     : `<p class="muted">Las pistas se reparten cuando empieza el juego.</p>`;
   box.innerHTML = `<div class="roles" id="rolesBg"><div class="roles-card">
     <p class="warn">No proyectes esto. Palabra: ${hv.word.e} ${esc(hv.word.word)} (${esc(hv.level.name)})</p>
